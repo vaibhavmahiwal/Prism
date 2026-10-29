@@ -1,0 +1,22 @@
+package executor
+
+import (
+	"context"
+	"io"
+)
+
+type Spec struct {
+	Image   string
+	Command string
+	WorkDir string
+	Env     []string
+	labels  map[string]string
+}
+
+//executor runs a spec in a docker container
+//exitCode is the commands owns exit code
+//err can be docker img not found, docker not running, etc
+
+type Executor interface {
+	Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (exitCode int, err error)
+}
