@@ -2,12 +2,15 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 type Docker struct {
@@ -35,14 +38,15 @@ func (d *Docker) Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (
 	if stderr == nil {
 		stderr = io.Discard
 	}
+
 	//this handles the case when the image is not present in the local docker reg
-	if err := d.InsureImage(ctx, spec.Image); err != nil {
-		return 0, fmt.Errorf("failed to ensure image %s:%v", spec.Image, err)
+	if err := d.ensureImage(ctx, spec.Image); err != nil {
+		return 0, fmt.Errorf("preparing Image %q:%w", spec.Image, err)
 	}
 	labels := map[string]string{
 		"ci_runner": "true",
 	}
-	for k, v := range spec.Labels {
+	for k, v := range spec.labels {
 		labels[k] = v
 	}
 	created, err := d.cli.ContainerCreate(ctx, &container.Config{
@@ -67,4 +71,60 @@ func (d *Docker) Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (
 			container.RemoveOptions{Force: true, RemoveVolumes: true})
 	}()
 
+	if err := d.cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+		return 0, fmt.Errorf("starting container:%w", err)
+	}
+
+	//stream logs while the container runs .Buffered channel so the
+	//goroutine never block if we return early
+	logsDone := make(chan error, 1)
+	go func() {
+		logs, err := d.cli.ContainerLogs(ctx, created.ID, container.LogsOptions{
+			ShowStdout: true,
+			ShowStderr: true,
+			Follow:     true,
+		})
+		if err != nil {
+			logsDone <- err
+			return
+		}
+		defer logs.Close()
+		_, err = stdcopy.StdCopy(stdout, stderr, logs) //splits the multiplexed streams
+		logsDone <- err
+	}()
+
+	statusCh, errCh := d.cli.ContainerWait(ctx, created.ID, container.WaitConditionNotRunning)
+	var exitCode int
+	select {
+	case err := <-errCh:
+		return 0, fmt.Errorf("waiting for container to finish:%w", err)
+	case status := <-statusCh:
+		exitCode = int(status.StatusCode)
+	}
+
+	//Wait for the log copy to finish so no output is lost
+	if err := <-logsDone; err != nil && !errors.Is(err, context.Canceled) {
+		return exitCode, fmt.Errorf("reading logs: %w", err)
+	}
+	return exitCode, nil
+}
+
+// ensureImage pulls the image if it is not present locally
+func (d *Docker) ensureImage(ctx context.Context, imageName string) error {
+	_, _, err := d.cli.ImageInspectWithRaw(ctx, imageName)
+	if err == nil {
+		return nil
+	}
+	if !client.IsErrNotFound(err) {
+		return err
+	}
+
+	rc, err := d.cli.ImagePull(ctx, imageName, image.PullOptions{})
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	//the pull only completes when the strea is fully read
+	_, err = io.Copy(io.Discard, rc)
+	return err
 }
