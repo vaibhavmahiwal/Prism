@@ -17,6 +17,7 @@ type Docker struct {
 	cli *client.Client
 }
 
+// this is a compile time check to ensure that docker implements the Executor interface
 var _ Executor = (*Docker)(nil)
 
 func NewDocker() (*Docker, error) {
@@ -33,7 +34,8 @@ func (d *Docker) Close() error {
 
 func (d *Docker) Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (int, error) {
 	if stdout == nil {
-		stdout = io.Discard
+		stdout = io.Discard //discard ignores every thing written to it,
+		//but does not return an error
 	}
 	if stderr == nil {
 		stderr = io.Discard
