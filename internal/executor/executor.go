@@ -11,6 +11,13 @@ type Spec struct {
 	WorkDir string
 	Env     []string
 	labels  map[string]string
+	Mounts  []Mount
+}
+
+type Mount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
 }
 
 //executor runs a spec in a docker container

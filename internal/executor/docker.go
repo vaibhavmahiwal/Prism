@@ -9,6 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 )
@@ -51,6 +52,21 @@ func (d *Docker) Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (
 	for k, v := range spec.labels {
 		labels[k] = v
 	}
+
+	var mounts []mount.Mount
+	for _, m := range spec.Mounts {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+
+	hostConfig := &container.HostConfig{
+		Mounts: mounts,
+	}
+
 	created, err := d.cli.ContainerCreate(ctx, &container.Config{
 		Image:      spec.Image,
 		Cmd:        []string{"sh", "-c", spec.Command},
@@ -58,12 +74,12 @@ func (d *Docker) Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (
 		Env:        spec.Env,
 		Labels:     labels,
 		Tty:        false,
-	},
-		&container.HostConfig{},
+	}, hostConfig,
 		nil, nil, "")
 	if err != nil {
 		return 0, fmt.Errorf("creating container: %w", err)
 	}
+
 	//Always cleanup,using a fresh context :if ctx was cancelled
 	//calls made with it would fail and container would leak
 	defer func() {
