@@ -49,7 +49,7 @@ func (d *Docker) Run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (
 	labels := map[string]string{
 		"ci_runner": "true",
 	}
-	for k, v := range spec.labels {
+	for k, v := range spec.Labels {
 		labels[k] = v
 	}
 

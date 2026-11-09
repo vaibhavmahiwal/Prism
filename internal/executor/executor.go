@@ -10,7 +10,7 @@ type Spec struct {
 	Command string
 	WorkDir string
 	Env     []string
-	labels  map[string]string
+	Labels  map[string]string
 	Mounts  []Mount
 }
 
