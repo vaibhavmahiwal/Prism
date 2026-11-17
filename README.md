@@ -2,11 +2,20 @@
 
 A small self-hosted CI runner written in Go. A GitHub webhook hits the server, the server queues a job, a worker runs the steps from a YAML pipeline file inside Docker containers, and logs and status are available through an API and a simple web page.
 
-See [PLAN.md](PLAN.md) for the full project plan.
+See [PLAN.md](PLAN.md) for the master plan and [docs/README.md](docs/README.md) for the documentation index.
 
 ## Status
 
-Phase 1 in progress. Check the boxes below as each item is completed.
+Phase 3 in progress: parser, Docker executor, git clone, and the run loop are done; CLI wiring remains. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Docs
+
+| Document | What it covers |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, flows, concurrency, failure paths |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Phase status, exit criteria, current focus |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | ADR log of design decisions |
+| [docs/NOTES.md](docs/NOTES.md) | Engineering log: bugs and fixes |
 
 ## How it works
 
