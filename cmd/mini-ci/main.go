@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+
+	"github.com/vaibhavmahiwal/Prism/internal/executor"
+	"github.com/vaibhavmahiwal/Prism/internal/pipeline"
+	"github.com/vaibhavmahiwal/Prism/internal/runner"
+	"github.com/vaibhavmahiwal/Prism/internal/scm"
 )
 
 func main() {
@@ -55,33 +62,31 @@ type runOptions struct {
 	keep      bool
 }
 
-//function to parse the flags for the run command,
-//  it takes the args and a writer to write errors to
-func parseRunFlags(args []string, _io.Writer)(runOptions,error){
-   var opts runOptions
-   fs:=flag.NewFlagSet("run",flag.ContinueOnError)
-   fs.SetOutput(_io)
-   fs.Usage=func(){}
+// function to parse the flags for the run command,
+//
+//	it takes the args and a writer to write errors to
+func parseRunFlags(args []string, stderr io.Writer) (runOptions, error) {
+	var opts runOptions
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {}
 
-   //this are the flags we want to parse, we can use the flag package to define them
-   fs.StringVar(&opts.file,"file",".mini-ci.yml","Path to pipeline file")
-   fs.StringVar(&opts.file, "f", ".mini-ci.yml", "")
-   fs.StringVar(&opts.workspace, "workspace", "", "")
-   fs.StringVar(&opts.workspace, "w", "", "")
-   fs.StringVar(&opts.repo, "repo", "", "")
-   fs.StringVar(&opts.sha, "sha", "", "")
-   fs.BoolVar(&opts.keep, "keep", false, "")
+	fs.StringVar(&opts.file, "file", ".mini-ci.yml", "Path to pipeline file")
+	fs.StringVar(&opts.file, "f", ".mini-ci.yml", "")
+	fs.StringVar(&opts.workspace, "workspace", "", "")
+	fs.StringVar(&opts.workspace, "w", "", "")
+	fs.StringVar(&opts.repo, "repo", "", "")
+	fs.StringVar(&opts.sha, "sha", "", "")
+	fs.BoolVar(&opts.keep, "keep", false, "")
 
-	//parse the flags
-	if err:=fs.Parse(args);err!=nil{
-		return runOptions{},err
+	if err := fs.Parse(args); err != nil {
+		return runOptions{}, err
 	}
-	//check if repo is set but sha is not
-	if fs.NArg()>0{
-		return runOptions{},fmt.Errorf("unexpected arguments: %v",fs.Args(0))
+	if fs.NArg() > 0 {
+		return runOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
-    //this is a validation step to ensure that the flags are used correctly
-		switch {
+
+	switch {
 	case opts.repo != "" && opts.sha == "":
 		return runOptions{}, errors.New("--repo requires --sha")
 	case opts.sha != "" && opts.repo == "":
@@ -89,27 +94,26 @@ func parseRunFlags(args []string, _io.Writer)(runOptions,error){
 	case opts.repo != "" && opts.workspace != "":
 		return runOptions{}, errors.New("--repo and --workspace cannot be used together")
 	}
-	return opts,nil
+	return opts, nil
 }
-//this dunctions runs the comand
-//it takes the args and the stdout and stderr writers
-func runCommand(args []string, stdout, stderr io.Writer) int {
-	opts,err:=parseRunFlags(args,stderr)
 
-	if errord.Is(err,flag.ErrHelp){
+func runCommand(args []string, stdout, stderr io.Writer) int {
+	opts, err := parseRunFlags(args, stderr)
+
+	if errors.Is(err, flag.ErrHelp) {
 		usage(stdout)
 		return 0
 	}
-	if err!=nil{
-		fmt.Fprintf(stderr,"mini-ci:%v\n",err)
+	if err != nil {
+		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
 		return 2
 	}
 
-	ctx,stop:=signal.NotifyContext(context.Background(),os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	dir, fileBase, cleanup, err := resolveWorkspace(ctx, opts, stderr)
-		if err != nil {
+	if err != nil {
 		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
 		if ctx.Err() != nil {
 			return 130
@@ -121,7 +125,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	if !filepath.IsAbs(filePath) {
 		filePath = filepath.Join(fileBase, filePath)
 	}
-    
+
 	p, err := pipeline.ParseFile(filePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
@@ -152,4 +156,78 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return reportResult(res, stdout, stderr)
+}
+
+func resolveWorkspace(ctx context.Context, opts runOptions, stderr io.Writer) (dir, fileBase string, cleanup func(), err error) {
+	if opts.repo != "" {
+		root, cloneErr := scm.CloneToTemp(ctx, opts.repo, opts.sha)
+		if cloneErr != nil {
+			return "", "", nil, cloneErr
+		}
+		dir = filepath.Join(root, "repo")
+		fileBase = dir
+		cleanup = func() {
+			if opts.keep {
+				fmt.Fprintf(stderr, "keeping cloned workspace at %q\n", root)
+				return
+			}
+			_ = os.RemoveAll(root)
+		}
+		return dir, fileBase, cleanup, nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", "", nil, fmt.Errorf("resolving current directory: %w", err)
+	}
+	base := opts.workspace
+	if base == "" {
+		base = cwd
+	}
+	dir, err = filepath.Abs(base)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("resolving absolute path of workspace %q: %w", base, err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("workspace %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return "", "", nil, fmt.Errorf("workspace %q is not a directory", dir)
+	}
+	return dir, cwd, func() {}, nil
+}
+
+// this is used to report the result of the run command ,
+// it takes the result , stdout and a writer to write errors to
+// and return the exit code of the command
+func reportResult(res *runner.Result, stdout, stderr io.Writer) int {
+	if res == nil {
+		fmt.Fprintln(stderr, "mini-ci: no result")
+		return 2
+	}
+	if err := res.WriteSummary(stdout); err != nil {
+		fmt.Fprintf(stderr, "mini-ci: writing summary: %v\n", err)
+		return 2
+	}
+	for _, step := range res.Steps {
+		switch step.Status {
+		case runner.StepStatusFailed:
+			fmt.Fprintf(stderr, "step %q failed with exit code %d\n", step.Name, step.ExitCode)
+		case runner.StepStatusErrored:
+			fmt.Fprintf(stderr, "step %q error: %v\n", step.Name, step.Err)
+		case runner.StepStatusCancelled:
+			fmt.Fprintf(stderr, "step %q cancelled\n", step.Name)
+		}
+	}
+	switch res.Status {
+	case runner.StepStatusPassed:
+		return 0
+	case runner.StepStatusFailed:
+		return 1
+	case runner.StepStatusCancelled:
+		return 130
+	default:
+		return 2
+	}
 }
