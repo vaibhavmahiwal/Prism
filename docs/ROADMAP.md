@@ -8,10 +8,10 @@ Last updated: 2026-11-17
 
 ## Snapshot
 
-- **Current phase:** 3 — run a pipeline from the CLI.
-- **Progress:** roughly 25-30% of the core build (Phases 1-9).
+- **Current phase:** 3 wrap-up — CLI is wired; manual Ctrl+C check remains.
+- **Progress:** roughly 30-35% of the core build (Phases 1-9).
 - **Tests:** `go test ./...` passes; Docker integration test is opt-in.
-- **Next milestone:** `mini-ci run .mini-ci.yml` works end to end.
+- **Next milestone:** close Phase 3, then start Phase 4 (store and job model).
 
 ## Phase status
 
@@ -20,7 +20,7 @@ Last updated: 2026-11-17
 | 0. Prerequisites | Done | Assumed | Go 1.26, Docker 28, git 2.50 present |
 | 1. Pipeline parser | Done | Yes | Parse, strict unknown fields, validation, tests |
 | 2. One command in one container | Done | Yes | `Executor` + Docker impl, log splitting, cancellation cleanup verified |
-| 3. Pipeline from the CLI | In progress | No | `scm` and `runner` done; CLI is still a stub |
+| 3. Pipeline from the CLI | In progress | Almost | CLI wired; pass, fail, and clone-at-SHA verified; Ctrl+C check remains |
 | 4. Store and job model | Not started | No | SQLite first |
 | 5. HTTP server and webhook | Not started | No | HMAC, 202 response |
 | 6. Queue, workers, shutdown | Not started | No | Context, timeout, graceful shutdown |
@@ -31,10 +31,16 @@ Last updated: 2026-11-17
 
 ## Phase 3: remaining work
 
-1. Wire `cmd/mini-ci/main.go`: `run` subcommand, flags, usage, exit-code mapping.
-2. Resolve workspace: local cwd or `scm.CloneToTemp`; validate absolute/existing directory.
-3. Add `signal.NotifyContext` and guarantee temp workspace cleanup on success, failure, cancel.
-4. Verify: pass exits 0, failure exits 1 and names the step, Ctrl+C exits 130 with no `ci_runner` containers left.
+Done and verified:
+
+- `run` subcommand, flags, usage, exit-code mapping, with unit tests.
+- Local workspace validation and `--repo`/`--sha` clone via `scm.CloneToTemp`.
+- Temp workspace cleanup on success and failure; `--keep` retains it.
+- Passing pipeline exits 0; failing pipeline exits 1 and names the step; no containers left after either.
+
+Remaining:
+
+1. Manual Ctrl+C check: start a long step, interrupt, confirm exit 130 and no `ci_runner` container remains.
 
 Hygiene before marking Phase 3 done:
 

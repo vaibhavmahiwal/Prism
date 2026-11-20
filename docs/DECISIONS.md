@@ -81,7 +81,7 @@ Entry format: id, date, status, context, decision, consequences.
 ## D-008: CLI exit-code scheme
 
 - **Date:** 2026-11-17
-- **Status:** Proposed — finalize when the CLI lands
+- **Status:** Accepted — implemented in `cmd/mini-ci/main.go`, covered by `main_test.go`
 - **Context:** Scripts and humans need stable codes.
 - **Decision (proposal):** `0` all steps passed, `1` a step exited non-zero, `2` infrastructure or configuration error, `130` interrupted (128 + SIGINT). Bad flags and invalid workspaces are `2`.
 - **Consequences:** Failed builds are distinguishable from a broken runner. The runner itself never exits; `main` owns the mapping.

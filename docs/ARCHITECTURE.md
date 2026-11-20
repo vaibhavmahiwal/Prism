@@ -14,7 +14,7 @@ Implemented through Phase 2, with Phase 3 half done:
 | Docker executor (`Executor` + Docker implementation) | Done |
 | Git clone at a commit | Done |
 | Pipeline run loop (`runner.Run`) | Done, unit-tested with a fake executor |
-| CLI (`cmd/mini-ci`) | Stub |
+| CLI (`cmd/mini-ci`) | Done; automated tests, manual Ctrl+C check pending |
 | Store, queue, worker pool, HTTP API, web UI | Not started |
 
 ## Component diagram
@@ -46,7 +46,7 @@ Implemented through Phase 2, with Phase 3 half done:
 | `internal/executor` | `Executor` interface, `Spec`, Docker implementation | Docker Engine SDK | Done |
 | `internal/scm` | Clone a repo, check out an exact commit | `git` via `os/exec` | Done |
 | `internal/runner` | Run pipeline steps in order through `Executor` | `pipeline`, `executor` | Done |
-| `cmd/mini-ci` | CLI wiring: flags, workspace, signals, exit codes | all of the above | Stub |
+| `cmd/mini-ci` | CLI wiring: flags, workspace, signals, exit codes | all of the above | Done |
 | `internal/store` | Jobs, steps, log lines behind a `Store` interface | SQLite driver | Planned |
 | `internal/queue` | Feed queued jobs to workers | `store` or channel | Planned |
 | `internal/worker` | Pool, per-job context, status transitions, shutdown | `Executor`, `Store`, `runner` | Planned |
@@ -75,7 +75,7 @@ main
   -> exit code (0 passed, 1 failed, 2 errored/infra, 130 cancelled)
 ```
 
-The CLI is not wired yet; `cmd/mini-ci/main.go` only prints a placeholder.
+Implemented in `cmd/mini-ci/main.go`. `--file` resolves relative to the current directory for local workspaces and inside the clone for `--repo`. Exit codes: 0 passed, 1 failed, 2 errored/infrastructure, 130 cancelled.
 
 ## Flow B: from a webhook (planned, Phases 5-7)
 
@@ -138,10 +138,11 @@ The executor owns containers. The caller that created the workspace owns it (`sc
 - `executor.Executor` is the seam for the run loop. `internal/runner/runner_test.go` uses an in-test fake; a shared `internal/executor/fake.go` may come with Phase 6 worker tests.
 - Docker integration tests are opt-in: set `MINICI_DOCKER_TEST=1`. The cancellation test waits for the container to reach `running`, cancels, asserts a `context.Canceled` error, and asserts no labelled container remains.
 - The parser uses table-driven tests. `scm` was verified against a temporary local git repo; no committed test exists yet.
+- `cmd/mini-ci/main_test.go` uses `run(args, stdout, stderr)` to test dispatch, flag validation, result-to-exit-code mapping, and workspace resolution without Docker.
 
 ## Not built yet
 
-- CLI wiring, workspace validation, temp workspace cleanup.
+- Manual Ctrl+C verification of the CLI; executor-level cancellation cleanup is already tested.
 - Store, queue, worker pool, HTTP API, web page, config package, migrations.
 - Per-job labels, orphan sweeper, resource limits, log size caps, retries, timeouts.
 - Log persistence and SSE streaming; today output goes straight to the writers passed to the executor.
