@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 )
 
 func main() {
@@ -88,4 +90,66 @@ func parseRunFlags(args []string, _io.Writer)(runOptions,error){
 		return runOptions{}, errors.New("--repo and --workspace cannot be used together")
 	}
 	return opts,nil
+}
+//this dunctions runs the comand
+//it takes the args and the stdout and stderr writers
+func runCommand(args []string, stdout, stderr io.Writer) int {
+	opts,err:=parseRunFlags(args,stderr)
+
+	if errord.Is(err,flag.ErrHelp){
+		usage(stdout)
+		return 0
+	}
+	if err!=nil{
+		fmt.Fprintf(stderr,"mini-ci:%v\n",err)
+		return 2
+	}
+
+	ctx,stop:=signal.NotifyContext(context.Background(),os.Interrupt)
+	defer stop()
+
+	dir, fileBase, cleanup, err := resolveWorkspace(ctx, opts, stderr)
+		if err != nil {
+		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
+		if ctx.Err() != nil {
+			return 130
+		}
+		return 2
+	}
+	defer cleanup()
+	filePath := opts.file
+	if !filepath.IsAbs(filePath) {
+		filePath = filepath.Join(fileBase, filePath)
+	}
+    
+	p, err := pipeline.ParseFile(filePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
+		if ctx.Err() != nil {
+			return 130
+		}
+		return 2
+	}
+
+	ex, err := executor.NewDocker()
+	if err != nil {
+		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
+		return 2
+	}
+	defer func() { _ = ex.Close() }()
+
+	res, err := runner.Run(ctx, p, ex, runner.Options{
+		Workspace: dir,
+		Stdout:    stdout,
+		Stderr:    stderr,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "mini-ci: %v\n", err)
+		if ctx.Err() != nil {
+			return 130
+		}
+		return 2
+	}
+
+	return reportResult(res, stdout, stderr)
 }
